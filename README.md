@@ -113,3 +113,224 @@
 <script src="app.js"></script>
 </body>
 </html>
+
+let DATA = [];
+
+const el = (id) => document.getElementById(id);
+
+function uniq(arr){ return [...new Set(arr.filter(Boolean))].sort(); }
+
+function hasFlag(u, flag){
+  if(flag === "scholarship") return (u.scholarships || []).length > 0;
+  if(flag === "internship") return !!(u.internships && (u.internships.has_industrial_training || (u.internships.source||[]).length));
+  if(flag === "partners") return (u.industry_partners || []).length > 0;
+  if(flag === "tuition") return !!(u.tuition && (u.tuition.range_per_year || (u.tuition.source||[]).length));
+  return true;
+}
+
+function textBlob(u){
+  const parts = [];
+  parts.push(u.name, u.type, u.state, u.website);
+  (u.programmes||[]).forEach(p=>{
+    parts.push(p.area);
+    (p.courses||[]).forEach(c=>parts.push(c));
+  });
+  (u.industry_partners||[]).forEach(p=>parts.push(p.name));
+  (u.scholarships||[]).forEach(s=>parts.push(s.name, s.eligibility, s.value));
+  return parts.filter(Boolean).join(" ").toLowerCase();
+}
+
+function render(){
+  const q = el("q").value.trim().toLowerCase();
+  const type = el("type").value;
+  const state = el("state").value;
+  const flag = el("flags").value;
+
+  const list = DATA.filter(u=>{
+    if(type && u.type !== type) return false;
+    if(state && u.state !== state) return false;
+    if(flag && !hasFlag(u, flag)) return false;
+    if(q){
+      const blob = textBlob(u);
+      if(!blob.includes(q)) return false;
+    }
+    return true;
+  });
+
+  el("count").textContent = `结果：${list.length} / ${DATA.length}`;
+
+  const grid = el("grid");
+  grid.innerHTML = "";
+  list.forEach(u=>{
+    const div = document.createElement("div");
+    div.className = "card";
+    const pills = [
+      `<span class="pill">${u.type || "—"}</span>`,
+      u.state ? `<span class="pill">${u.state}</span>` : ""
+    ].join("");
+
+    const tags = [];
+    if((u.scholarships||[]).length) tags.push("奖学金");
+    if(u.internships && (u.internships.has_industrial_training || (u.internships.source||[]).length)) tags.push("实习");
+    if((u.industry_partners||[]).length) tags.push("合作企业");
+    if(u.tuition && (u.tuition.range_per_year || (u.tuition.source||[]).length)) tags.push("学费");
+    const tagLine = tags.length ? tags.map(t=>`<span class="pill">${t}</span>`).join("") : `<span class="muted">（信息待补齐）</span>`;
+
+    div.innerHTML = `
+      <div style="display:flex;justify-content:space-between;gap:8px">
+        <div style="font-weight:700">${u.name}</div>
+      </div>
+      <div style="margin:6px 0">${pills}</div>
+      <div class="muted" style="margin:6px 0 10px;line-height:1.35">
+        ${u.website ? u.website : ""}
+      </div>
+      <div>${tagLine}</div>
+      <div class="muted" style="margin-top:8px">最后核对：${u.last_verified || "—"}</div>
+    `;
+    div.onclick = ()=>openDetail(u);
+    grid.appendChild(div);
+  });
+}
+
+function toLinks(items){
+  if(!items || !items.length) return `<span class="muted">暂无</span>`;
+  return `<ul class="list">` + items.map(x=>{
+    if(typeof x === "string") return `<li>${x}</li>`;
+    const title = x.title || x.name || x.url || "link";
+    return `<li><a href="${x.url}" target="_blank" rel="noopener">${title}</a></li>`;
+  }).join("") + `</ul>`;
+}
+
+function openDetail(u){
+  el("d_name").textContent = u.name;
+  el("d_meta").textContent = `${u.type || "—"} · ${u.state || "—"}`;
+
+  el("d_web").innerHTML = u.website
+    ? `<a href="${u.website}" target="_blank" rel="noopener">${u.website}</a>`
+    : `<span class="muted">暂无</span>`;
+
+  // programmes
+  if((u.programmes||[]).length){
+    const html = u.programmes.map(p=>{
+      const courses = (p.courses||[]).length ? p.courses.join(" / ") : "—";
+      const mqa = (p.mqa_links||[]).map(url=>`<a href="${url}" target="_blank" rel="noopener">MQR</a>`).join(" ");
+      return `<div><b>${p.area || "—"}</b><div class="muted">${courses} ${mqa ? " · " + mqa : ""}</div></div>`;
+    }).join("<div style='height:8px'></div>");
+    el("d_prog").innerHTML = html;
+  } else {
+    el("d_prog").innerHTML = `<span class="muted">暂无（可先从学院/课程目录页补齐）</span>`;
+  }
+
+  // tuition
+  if(u.tuition){
+    const r = u.tuition.range_per_year;
+    const range = r ? `${u.tuition.currency || "MYR"} ${r.min ?? "?"} – ${r.max ?? "?"} / year` : "—";
+    el("d_tuition").innerHTML = `<div>${range}</div>${toLinks(u.tuition.source || [])}`;
+  } else el("d_tuition").innerHTML = `<span class="muted">暂无</span>`;
+
+  // scholarships
+  if((u.scholarships||[]).length){
+    el("d_sch").innerHTML = `<ul class="list">` + u.scholarships.map(s=>{
+      const link = s.url ? ` <a href="${s.url}" target="_blank" rel="noopener">详情</a>` : "";
+      const meta = [s.value, s.eligibility].filter(Boolean).join(" · ");
+      return `<li><b>${s.name || "Scholarship"}</b> <span class="muted">${meta}</span>${link}</li>`;
+    }).join("") + `</ul>`;
+  } else el("d_sch").innerHTML = `<span class="muted">暂无</span>`;
+
+  // internships
+  if(u.internships){
+    const t = u.internships.has_industrial_training ? "有工业培训/实习模块" : "（未标注是否必修）";
+    el("d_intern").innerHTML = `<div>${t}</div>${toLinks(u.internships.source || [])}`;
+  } else el("d_intern").innerHTML = `<span class="muted">暂无</span>`;
+
+  // partners
+  if((u.industry_partners||[]).length){
+    el("d_partners").innerHTML = `<ul class="list">` + u.industry_partners.map(p=>{
+      const link = p.evidence_url ? ` <a href="${p.evidence_url}" target="_blank" rel="noopener">证据</a>` : "";
+      return `<li>${p.name || "Partner"}${link}</li>`;
+    }).join("") + `</ul>`;
+  } else el("d_partners").innerHTML = `<span class="muted">暂无</span>`;
+
+  // sources
+  const sources = (u.sources || []).map(s=>({title: s.title, url: s.url}));
+  el("d_sources").innerHTML = "";
+  if(sources.length){
+    sources.forEach(s=>{
+      const li = document.createElement("li");
+      li.innerHTML = `<a href="${s.url}" target="_blank" rel="noopener">${s.title || s.url}</a>`;
+      el("d_sources").appendChild(li);
+    });
+  } else {
+    const li = document.createElement("li");
+    li.innerHTML = `<span class="muted">暂无</span>`;
+    el("d_sources").appendChild(li);
+  }
+
+  el("d_verified").textContent = `最后核对日期：${u.last_verified || "—"}`;
+  el("dlg").showModal();
+}
+
+async function init(){
+  const res = await fetch("universities.json");
+  DATA = await res.json();
+
+  // state filter options
+  const states = uniq(DATA.map(u=>u.state));
+  const stateSel = el("state");
+  states.forEach(s=>{
+    const opt = document.createElement("option");
+    opt.value = s; opt.textContent = s;
+    stateSel.appendChild(opt);
+  });
+
+  ["q","type","state","flags"].forEach(id=>el(id).addEventListener("input", render));
+  el("reset").onclick = ()=>{
+    el("q").value=""; el("type").value=""; el("state").value=""; el("flags").value="";
+    render();
+  };
+  el("close").onclick = ()=>el("dlg").close();
+
+  render();
+}
+
+init();
+
+[
+  {
+    "id": "um",
+    "name": "Universiti Malaya",
+    "type": "Public",
+    "state": "Kuala Lumpur",
+    "website": "https://www.um.edu.my",
+    "programmes": [],
+    "tuition": null,
+    "scholarships": [],
+    "internships": null,
+    "industry_partners": [],
+    "sources": [],
+    "last_verified": "2026-01-19"
+  },
+  {
+    "id": "apu",
+    "name": "Asia Pacific University of Technology & Innovation (APU)",
+    "type": "Private",
+    "state": "Kuala Lumpur",
+    "website": "https://www.apu.edu.my",
+    "programmes": [
+      {"area":"Computing / IT", "courses":["Software Engineering","Cyber Security"], "mqa_links":[]}
+    ],
+    "tuition": {
+      "currency": "MYR",
+      "range_per_year": null,
+      "source": []
+    },
+    "scholarships": [],
+    "internships": {
+      "has_industrial_training": true,
+      "source": []
+    },
+    "industry_partners": [],
+    "sources": [],
+    "last_verified": "2026-01-19"
+  }
+]
